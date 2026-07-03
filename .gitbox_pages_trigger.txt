@@ -1,0 +1,4 @@
+GitBox Pages deploy trigger
+Box: Box-Project
+Updated: 2026-07-03 17:44:51
+Purpose: trigger one clean GitHub Pages deployment from main/root.

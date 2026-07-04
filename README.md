@@ -2,7 +2,12 @@
 
 Cloud manual/reference library.
 
-_Updated: 2026-07-03 17:44:46_
+_Updated: 2026-07-04 14:12:22_
+
+## PDF Files
+
+- [Blacckyman-spec.pdf](Blacckyman-spec.pdf) (195.46 KB)
+- [Boboman-skyX7C-Spec.pdf](Boboman-skyX7C-Spec.pdf) (187.87 KB)
 
 ## Image Files
 

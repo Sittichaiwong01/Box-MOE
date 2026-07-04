@@ -1,0 +1,639 @@
+SkR00 DOCUMENT EXTRACTION
+Document: Build Your Own Fully Private, Local AI Stack
+Mode: Full Extraction / Not Summary
+Standard: SkR00 / MEM00 Document Extraction Standard
+Created: 2026-07-03
+Language: Thai
+
+============================================================
+HEADER / CONTEXT
+============================================================
+
+เอกสารนี้อธิบายแนวคิดและโครงสร้างของการสร้าง Local Private AI
+Stack หรือระบบ AI ส่วนตัวที่รันบนฮาร์ดแวร์ของผู้ใช้เอง โดยไม่พึ่งพา
+คลาวด์เป็นหลัก จุดสำคัญไม่ใช่แค่ “รันโมเดลในเครื่อง” แต่คือการสร้าง
+ระบบรอบโมเดลให้ครบ ได้แก่ LLM runtime, server endpoint, chat UI,
+RAG, vector database, coding agent, automation, container management,
+remote access และเครื่องเฉพาะที่เปิดใช้งานตลอดเวลา
+
+เป้าหมายหลักคือให้ผู้ใช้ครอบครอง ควบคุม และต่อยอดระบบ AI ของตัวเอง
+แทนการเช่า AI จากบริการภายนอก ลดความเสี่ยงจากราคา นโยบาย การแบนโมเดล
+หรือการส่งข้อมูลส่วนตัวไปยังคลาวด์
+
+เอกสารนี้มีประโยชน์ต่อระบบ AI House / BOBOman / BlackyMan เพราะเป็น
+กรอบคิดสำหรับจัด local AI stack ให้เป็นระบบใช้งานจริง ไม่ใช่แค่การติดตั้ง
+LM Studio หรือโหลดโมเดลมาใช้งานเดี่ยว ๆ
+
+============================================================
+SYSTEM COMPONENTS
+============================================================
+
+------------------------------------------------------------
+1. LOCAL AI STACK
+------------------------------------------------------------
+
+Local AI Stack คือระบบ AI ที่ประกอบด้วยหลายชั้น ไม่ใช่โปรแกรมเดียวหรือ
+โมเดลเดียว ระบบถูกเปรียบเหมือน “ต้นไม้” ที่มีราก ลำต้น กิ่ง และเครื่องมือ
+รอบข้าง
+
+องค์ประกอบหลัก:
+- Hardware
+- llama.cpp
+- llama server / router
+- OpenAI-compatible REST endpoint
+- Chat UI
+- RAG system
+- Vector database
+- Embedding model
+- Coding agent
+- Automation system
+- Tools / app integrations
+- Docker / Docker Compose
+- Container manager
+- Remote private network
+
+หน้าที่ของ Local AI Stack คือทำให้ผู้ใช้มี AI ที่ใช้งานได้จริง ทั้งการคุย
+ถามเอกสาร เขียนโค้ด วิเคราะห์ไฟล์ ทำงานอัตโนมัติ และเชื่อมกับแอปอื่น
+โดยไม่ต้องส่งข้อมูลไปยัง AI cloud
+
+Relational Logic:
+- IF เป้าหมายคือ private AI จริง THEN ต้องมีทั้ง model runtime และ
+  service layer รอบตัวโมเดล
+- IF มีแค่โมเดลแต่ไม่มี endpoint / UI / automation THEN ระบบยังเป็นเพียง
+  model runner ไม่ใช่ AI stack เต็มรูปแบบ
+- IF ต้องการให้ AI ทำงานจริงในชีวิตประจำวัน THEN ต้องเชื่อม model กับ
+  tools และ automation
+
+------------------------------------------------------------
+2. HARDWARE
+------------------------------------------------------------
+
+Hardware คือฐานทรัพยากรของระบบ AI ทั้งหมด เป็น “ราก” ของต้นไม้ AI เพราะ
+llama.cpp และโมเดลต้องดึง CPU, GPU, RAM, storage และ network จากเครื่องจริง
+
+แนวคิดสำคัญ:
+- ควรมีเครื่องเฉพาะสำหรับรัน AI ถ้าต้องการใช้งานจริงแบบต่อเนื่อง
+- เครื่องควรเปิดใช้งานได้ตลอดเวลา
+- ไม่ควรวาง automation สำคัญไว้บนแล็ปท็อปที่พกพาหรือปิดเครื่องบ่อย
+- ควรตั้ง BIOS ให้เปิดเครื่องเองหลังไฟดับ เพื่อให้บริการกลับมาทำงาน
+  อัตโนมัติ
+
+สำหรับระบบของผู้ใช้ แนวคิดนี้สัมพันธ์กับ:
+- BOBOman = local AI / tensor engine / desktop interactive stack
+- BlackyMan = batch worker / data factory / background process
+- เครื่องเฉพาะควรมี storage, log, report path และ restore plan ชัดเจน
+
+Relational Logic:
+- IF workflow ต้องรัน 24 ชั่วโมง THEN ต้องใช้เครื่อง dedicated มากกว่า
+  notebook ที่ปิด/พกพาบ่อย
+- IF ไฟดับแล้วเครื่องไม่เปิดกลับเอง THEN automation จะหยุดและต้องให้คน
+  มาเปิดเครื่องเอง
+- IF มีระบบ AI stack หลาย service THEN hardware ต้องมี storage และ RAM
+  พอสำหรับ container, model, vector database และ log
+
+------------------------------------------------------------
+3. LLAMA.CPP
+------------------------------------------------------------
+
+llama.cpp คือ engine หลักสำหรับรัน LLM local ทำหน้าที่โหลดโมเดล ประมวลผล
+inference และสร้าง token output
+
+บทบาท:
+- เป็น core runtime
+- ใช้ทรัพยากรจาก hardware
+- ให้บริการโมเดลผ่าน llama server
+- เป็นฐานให้ router หรือ service layer อื่นเชื่อมต่อ
+- สามารถเปิด endpoint ที่ compatible กับ OpenAI API ได้
+
+ข้อสรุป:
+llama.cpp ไม่ใช่แค่ตัวเปิดโมเดล แต่เป็นฐาน engine ที่ทำให้โมเดล local
+ถูกนำไปเชื่อมกับ UI, RAG, coding agent และ automation ได้
+
+Relational Logic:
+- IF ต้องการรัน local LLM แบบควบคุมเอง THEN llama.cpp เป็นหนึ่งในแกน
+  runtime ที่ใช้ได้
+- IF ต้องการให้เครื่องมืออื่นเรียกใช้โมเดลได้ THEN ต้องเปิด llama.cpp
+  ผ่าน server endpoint
+- IF ใช้ llama.cpp แบบ local เท่านั้นโดยไม่มี server THEN การเชื่อมต่อกับ
+  stack อื่นจะจำกัดกว่า
+
+------------------------------------------------------------
+4. LLAMA SERVER / ROUTER
+------------------------------------------------------------
+
+llama server คือ server ที่มากับ llama.cpp ใช้ให้บริการโมเดลผ่าน network
+endpoint
+
+Router คือชั้นจัดการ routing ไปยังโมเดลต่าง ๆ เพื่อให้ระบบเลือกหรือให้บริการ
+หลายโมเดลได้
+
+Parameters / Notes:
+- llama server มี server mode
+- llama server อาจมี router / preset model mode
+- router ของ llama server อาจยังอยู่ในช่วงทดลอง
+- มีรายงานว่าผู้ใช้บางคนเจอปัญหากับ router
+- ทางเลือกหนึ่งคือใช้ llama-swap หรือ service/router ตัวอื่น
+
+Relational Logic:
+- IF ต้องการเชื่อมหลายโมเดลกับเครื่องมือหลายตัว THEN ต้องมี server/router
+  layer
+- IF router ของ llama server ไม่เสถียร THEN ใช้ router ภายนอก เช่น
+  llama-swap
+- IF endpoint เข้ากันได้กับ OpenAI THEN เครื่องมือ open-source จำนวนมาก
+  จะเชื่อมต่อได้ง่ายขึ้น
+
+------------------------------------------------------------
+5. OPENAI-COMPATIBLE REST ENDPOINT
+------------------------------------------------------------
+
+OpenAI-compatible REST endpoint คือจุดเชื่อมต่อมาตรฐานที่ทำให้เครื่องมืออื่น
+มอง local model เหมือนเป็น OpenAI API
+
+บทบาท:
+- ให้ AnythingLLM เชื่อมต่อกับ local model
+- ให้ Open WebUI เชื่อมต่อกับ local model
+- ให้ coding agent เชื่อมต่อกับ local model
+- ให้ n8n ใช้ node แบบ OpenAI ได้ แต่ชี้ base URL มาที่ local server
+- ทำให้ระบบ local กลายเป็นศูนย์กลางที่เครื่องมืออื่นเรียกใช้งานได้
+
+Parameters:
+- Base URL อาจเป็น IP เครื่อง + port เช่น http://<local-ip>:8080
+- endpoint มักต่อท้ายด้วย /v1
+- API key ในบางเครื่องมืออาจใส่ค่า dummy ได้ ถ้า server local ไม่บังคับตรวจจริง
+
+Relational Logic:
+- IF tool รองรับ OpenAI API compatible endpoint THEN สามารถ route ไป local
+  LLM ได้
+- IF ใช้ local endpoint แทน OpenAI endpoint THEN ข้อมูลไม่ต้องถูกส่งไป cloud AI
+- IF endpoint เดียวให้บริการหลายโมเดล THEN UI, agent, automation สามารถเลือก
+  โมเดลผ่านระบบเดียวกัน
+
+------------------------------------------------------------
+6. CHAT UI
+------------------------------------------------------------
+
+Chat UI คือหน้าจอสำหรับคุยกับโมเดล local โดยตรง
+
+ตัวเลือกที่กล่าวถึง:
+- AnythingLLM
+- Open WebUI
+
+AnythingLLM:
+- เป็น open-source
+- ใช้เป็น desktop app ได้
+- ใช้แบบ server/headless ผ่าน Docker ได้
+- รองรับ LLM provider แบบ generic OpenAI
+- เชื่อมกับ llama.cpp ผ่าน base URL ได้
+- มีระบบ workspace และ RAG ในตัว
+
+Open WebUI:
+- เป็นอีกทางเลือกสำหรับ chat UI
+- รองรับการเชื่อม local model และ RAG ได้เช่นกัน
+
+Relational Logic:
+- IF ต้องการคุยกับ local model แบบสะดวก THEN ต้องมี Chat UI
+- IF ใช้ AnythingLLM/Open WebUI THEN สามารถใช้ทั้ง chat และ document/RAG
+  ได้ในระบบเดียว
+- IF ใช้ Docker + host networking THEN UI สามารถเข้าถึง llama server บนเครื่อง
+  เดียวกันได้ง่ายขึ้น
+
+------------------------------------------------------------
+7. RAG SYSTEM
+------------------------------------------------------------
+
+RAG หรือ Retrieval Augmented Generation คือระบบที่ทำให้ AI ตอบจากเอกสารของ
+ผู้ใช้เอง โดยใช้การแบ่งเอกสาร จัดทำดัชนี สร้าง embedding และค้นคืนข้อมูลจาก
+vector database
+
+บทบาท:
+- อัปโหลด PDF / เอกสาร
+- chunk เอกสาร
+- embed เอกสาร
+- เก็บใน vector database
+- ค้นหาตาม semantic meaning
+- ส่ง context ที่เกี่ยวข้องให้ LLM ตอบ
+- แสดงแหล่งที่มาของคำตอบเพื่อให้ตรวจสอบได้
+
+คุณค่าหลัก:
+- ลดการตอบมั่วของ LLM
+- ให้คำตอบอิงข้อมูลของผู้ใช้เอง
+- เก็บข้อมูลไว้ในเครื่อง
+- เหมาะกับงานวิจัย เอกสารเก่า เอกสารจำนวนมาก และ knowledge base ส่วนตัว
+
+Relational Logic:
+- IF ต้องการคำตอบที่อิงเอกสารจริง THEN ต้องใช้ RAG
+- IF มีเอกสารจำนวนมาก THEN semantic search สำคัญกว่าการค้นแบบ keyword อย่างเดียว
+- IF RAG แสดง source ได้ THEN ผู้ใช้สามารถ verify คำตอบได้
+- IF ข้อมูลส่วนตัวไม่ควรออกนอกเครื่อง THEN RAG local ดีกว่า cloud RAG
+
+------------------------------------------------------------
+8. VECTOR DATABASE
+------------------------------------------------------------
+
+Vector database คือฐานข้อมูลที่เก็บ embedding ของเอกสาร เพื่อให้ค้นหาตาม
+ความหมายได้
+
+ตัวอย่างในเอกสาร:
+- LanceDB เป็น default local vector database ใน AnythingLLM
+
+Parameters:
+- ใช้ค่า default ได้ถ้าไม่ต้องปรับแต่ง
+- เปลี่ยนเป็น vector database ตัวอื่นได้
+- เก็บข้อมูล embedding ของ chunk เอกสาร
+
+Relational Logic:
+- IF มี RAG THEN ต้องมี vector database
+- IF ใช้ AnythingLLM แบบ default THEN LanceDB ใช้งานได้ทันที
+- IF ต้องการความเรียบง่าย THEN ใช้ local default ก่อน ไม่จำเป็นต้องเปลี่ยน database
+
+------------------------------------------------------------
+9. EMBEDDING MODEL
+------------------------------------------------------------
+
+Embedding model คือโมเดลที่แปลงข้อความหรือ chunk เอกสารเป็น semantic vector
+
+บทบาท:
+- อ่านเนื้อหาเอกสาร
+- แปลง chunk เป็น embedding
+- ทำให้ค้นเอกสารด้วยความหมายได้
+- เป็นส่วนสำคัญของ RAG pipeline
+
+Relational Logic:
+- IF ไม่มี embedding THEN vector search ตามความหมายทำไม่ได้
+- IF embedding คุณภาพดี THEN RAG retrieval แม่นขึ้น
+- IF ใช้ค่า default ใน AnythingLLM THEN เริ่มต้นได้ง่ายโดยไม่ต้องตั้งค่าซับซ้อน
+
+------------------------------------------------------------
+10. CODING AGENT
+------------------------------------------------------------
+
+Coding agent คือ agent สำหรับอ่าน วิเคราะห์ และแก้ไข codebase ในเครื่อง
+
+ตัวเลือกที่กล่าวถึง:
+- Pie / pi.dev coding agent
+- Open-source coding agent อื่น
+- Claude Code ถูกกล่าวถึงเป็นเครื่องมือที่ผู้พูดใช้ส่วนตัว แต่เป้าหมายของเอกสาร
+  คือหาทางเลือก local
+
+บทบาท:
+- วิเคราะห์ codebase
+- อ่าน architecture
+- ตรวจ build error
+- แก้ config
+- ใช้ local LLM ผ่าน llama.cpp endpoint
+- ทำงานเป็น modular coding assistant
+
+Parameters:
+- ติดตั้งผ่าน npm ได้
+- ใช้ plugin สำหรับ llama.cpp
+- ตั้งค่า URL ไปยัง llama.cpp endpoint เช่น http://<server-ip>:8080/v1
+- ใช้คำสั่ง /models เพื่อเลือกโมเดลที่ server ให้บริการ
+
+Relational Logic:
+- IF ต้องการ coding assistant ที่ไม่พึ่ง cloud THEN ใช้ local coding agent
+- IF coding agent รองรับ llama.cpp plugin THEN ใช้ local model ได้
+- IF codebase เก่า build ไม่ผ่าน THEN coding agent อาจช่วยวิเคราะห์ dependency,
+  config หรือ build error ได้
+- IF งาน code ต้องใช้ความแม่นสูง THEN ควรมี validation/report หลัง agent แก้ไข
+
+------------------------------------------------------------
+11. AUTOMATION SYSTEM
+------------------------------------------------------------
+
+Automation system คือส่วนที่ทำให้ AI ทำงานเองตาม trigger โดยไม่ต้องให้ผู้ใช้
+นั่งสั่งทุกครั้ง
+
+เครื่องมือหลัก:
+- n8n
+
+บทบาท:
+- เชื่อมต่อกับแอปต่าง ๆ
+- อ่าน email / news / website / service
+- ใช้ trigger ตามเวลา หรือเงื่อนไข
+- ส่งข้อมูลให้ local LLM วิเคราะห์
+- ใช้ tool action เช่น Gmail label
+- ทำงานซ้ำอัตโนมัติ เช่น ทุกชั่วโมง
+
+ตัวอย่าง workflow:
+- Trigger ตรวจอีเมลทุกชั่วโมง
+- ส่ง subject + body ให้ agent
+- Agent ตัดสินว่า email สำคัญหรือไม่
+- ถ้าสำคัญ ใช้ Gmail tool เพิ่ม label ให้ email
+- ทั้งหมดใช้ local LLM endpoint แทน OpenAI cloud
+
+Relational Logic:
+- IF ต้องการให้ AI ทำงานขณะผู้ใช้ไม่อยู่ THEN ต้องมี automation
+- IF n8n เชื่อมกับ OpenAI-compatible endpoint ได้ THEN ใช้ local LLM ใน workflow ได้
+- IF workflow ใช้ Gmail action THEN AI สามารถทำงานกับ email ได้จริง ไม่ใช่แค่วิเคราะห์ข้อความ
+- IF email เป็นข้อมูลส่วนตัว THEN local endpoint ลดการส่งข้อมูลออก cloud
+
+------------------------------------------------------------
+12. TOOL LAYER
+------------------------------------------------------------
+
+Tool Layer คือความสามารถให้ AI ทำ action จริงกับระบบหรือแอปอื่น
+
+ตัวอย่าง:
+- Gmail add label
+- Email trigger
+- App connector
+- Website/news connector
+- Tool description ให้ AI เข้าใจว่าเครื่องมือทำอะไร
+
+Relational Logic:
+- IF AI ไม่มี tool THEN AI ทำได้แค่ตอบข้อความ
+- IF AI มี tool THEN AI สามารถทำงานกับระบบจริง เช่น label email, update record,
+  trigger action
+- IF tool description ชัด THEN agent เลือกใช้ tool ได้แม่นขึ้น
+- IF tool เชื่อมกับข้อมูลส่วนตัว THEN ต้องควบคุม privacy และ permission
+
+------------------------------------------------------------
+13. DOCKER / DOCKER COMPOSE
+------------------------------------------------------------
+
+Docker ใช้สำหรับติดตั้งและรัน service ต่าง ๆ เช่น AnythingLLM, n8n และ
+container manager
+
+บทบาท:
+- ทำให้ติดตั้งง่าย
+- แยก service เป็น container
+- จัดการ volume
+- ใช้ Docker Compose เพื่อประกาศ service
+- ทำให้ระบบ local stack เป็นระเบียบและย้ายง่ายขึ้น
+
+Relational Logic:
+- IF service มี Docker Compose THEN ติดตั้งซ้ำ/ย้ายเครื่องง่ายขึ้น
+- IF ใช้ network mode host THEN container เข้าถึง service บนเครื่องเดียวกันได้ง่าย
+- IF ใช้หลาย service THEN ควรมี container manager ช่วยดูแล
+
+------------------------------------------------------------
+14. CONTAINER MANAGER
+------------------------------------------------------------
+
+Container manager คือ dashboard สำหรับดูแล container โดยไม่ต้องใช้ terminal
+ตลอดเวลา
+
+ตัวอย่าง:
+- Portainer
+- Arcane
+
+บทบาท:
+- ดูสถานะ container
+- restart service
+- manage compose project
+- ลดความจำเป็นในการใช้ command line
+- เหมาะกับระบบที่ต้องรันประจำ
+
+Relational Logic:
+- IF local AI stack มีหลาย container THEN container manager ช่วยลดความยุ่งยาก
+- IF ผู้ใช้ต้องการระบบใช้งานจริงระยะยาว THEN ควรมี dashboard จัดการบริการ
+
+------------------------------------------------------------
+15. TAILSCALE / PRIVATE REMOTE ACCESS
+------------------------------------------------------------
+
+Tailscale ใช้สร้าง private network เพื่อเข้าถึง local AI stack จากภายนอก
+อย่างปลอดภัย
+
+บทบาท:
+- เข้าถึงเครื่อง AI จากโทรศัพท์หรือแล็ปท็อป
+- ทำให้เครื่องเหมือนอยู่ network เดียวกัน
+- ลดความจำเป็นในการเปิด port สาธารณะ
+- เหมาะกับระบบ AI ที่อยู่บ้านแต่ต้องใช้งานจากที่อื่น
+
+Relational Logic:
+- IF ต้องการใช้ AI stack จากนอกบ้าน THEN ใช้ private network เช่น Tailscale
+- IF ไม่ต้องการ expose service สู่ internet ตรง ๆ THEN Tailscale ปลอดภัยกว่า
+  การเปิด port
+- IF เครื่อง AI เปิดตลอดเวลา THEN remote access ทำให้ใช้งานได้เหมือน private
+  cloud ส่วนตัว
+
+============================================================
+OPERATIONS WORKFLOW
+============================================================
+
+------------------------------------------------------------
+PHASE 1: BUILD LOCAL LLM CORE
+------------------------------------------------------------
+
+1. เตรียม hardware สำหรับรัน AI
+2. ติดตั้ง llama.cpp
+3. เปิด llama server
+4. ตั้งค่า server/router หรือใช้ llama-swap ถ้าต้องการ routing ที่เสถียรกว่า
+5. เปิด OpenAI-compatible REST endpoint
+6. ตรวจสอบว่า endpoint ให้บริการโมเดลได้จริง
+
+Success Criteria:
+- local model ตอบได้
+- endpoint ใช้งานได้
+- เครื่องมืออื่นสามารถเรียก endpoint ได้
+
+------------------------------------------------------------
+PHASE 2: ADD CHAT UI
+------------------------------------------------------------
+
+1. เลือก Chat UI เช่น AnythingLLM หรือ Open WebUI
+2. ติดตั้งผ่าน Docker หรือ desktop app
+3. ตั้งค่า provider เป็น generic OpenAI
+4. ใส่ base URL ของ llama server
+5. เลือก model จาก dropdown
+6. ตั้ง context window และ max token limit
+7. ทดสอบถามตอบ
+
+Success Criteria:
+- UI เชื่อมกับ local model ได้
+- ผู้ใช้คุยกับโมเดลผ่าน browser/UI ได้
+- ไม่ต้องใช้ OpenAI cloud
+
+------------------------------------------------------------
+PHASE 3: ADD RAG
+------------------------------------------------------------
+
+1. เปิด vector database setting
+2. ใช้ LanceDB หรือ vector database อื่น
+3. ตั้ง embedding model
+4. อัปโหลดเอกสาร
+5. ระบบ chunk + embed + index เอกสาร
+6. เปลี่ยน workspace chat mode ตามความเหมาะสม
+7. ถามคำถามจากเอกสาร
+8. ตรวจว่า AI แสดง source ของคำตอบได้
+
+Success Criteria:
+- ค้นเอกสารด้วย semantic search ได้
+- คำตอบอิงเอกสารจริง
+- มี source ให้ตรวจสอบ
+
+------------------------------------------------------------
+PHASE 4: ADD CODING AGENT
+------------------------------------------------------------
+
+1. ติดตั้ง coding agent เช่น Pie ผ่าน npm
+2. ติดตั้ง plugin สำหรับ llama.cpp
+3. ตั้งค่า URL ไปยัง llama.cpp endpoint
+4. ใช้ /models เพื่อเลือกโมเดล
+5. ให้ agent วิเคราะห์ codebase
+6. ให้ agent ตรวจ error หรือแก้ config
+7. ตรวจผลลัพธ์ด้วย build/test/report
+
+Success Criteria:
+- agent อ่าน codebase ได้
+- agent ใช้ local model ได้
+- agent แสดง architecture หรือแก้ error ได้
+- ต้องมี validation หลังการแก้ไข
+
+------------------------------------------------------------
+PHASE 5: ADD AUTOMATION
+------------------------------------------------------------
+
+1. ติดตั้ง n8n ด้วย Docker Compose
+2. เปิด n8n ผ่าน browser
+3. ตั้ง credential แบบ OpenAI-compatible โดยชี้ base URL มาที่ local LLM
+4. สร้าง trigger เช่น ตรวจ Gmail ทุกชั่วโมง
+5. ส่ง subject/body เข้า agent
+6. กำหนด system prompt ให้ agent ตัดสินความสำคัญ
+7. เพิ่ม tool action เช่น Gmail add label
+8. ทดสอบ workflow
+9. เปิดให้รันตาม schedule
+
+Success Criteria:
+- workflow รันเองตามเวลา
+- local LLM วิเคราะห์ข้อมูลได้
+- tool action ทำงานจริง
+- ข้อมูลส่วนตัวไม่ถูกส่งไป cloud AI
+
+------------------------------------------------------------
+PHASE 6: PRODUCTION-READY HOME AI LAB
+------------------------------------------------------------
+
+1. ใช้เครื่องเฉพาะสำหรับ AI
+2. ตั้ง BIOS ให้เปิดเครื่องเองหลังไฟดับ
+3. ติดตั้ง container manager เช่น Portainer หรือ Arcane
+4. ติดตั้ง Tailscale สำหรับ remote private access
+5. ตรวจ service auto-start
+6. ทำ report/log สำหรับ service สำคัญ
+7. วาง backup / restore plan
+
+Success Criteria:
+- เครื่องเปิดเองหลังไฟดับ
+- service กลับมาทำงานได้เอง
+- จัดการ container ผ่าน browser ได้
+- เข้าถึงระบบจากภายนอกได้อย่างปลอดภัย
+
+============================================================
+RELATIONAL LOGIC
+============================================================
+
+- IF เป้าหมายคือ private AI จริง THEN ห้ามมองแค่ “โหลดโมเดล” แต่ต้องมี
+  stack รอบโมเดลครบ
+- IF ต้องการให้เครื่องมือหลายตัวใช้ local model ได้ THEN ต้องมี
+  OpenAI-compatible endpoint
+- IF ต้องการ chat พื้นฐาน THEN ใช้ AnythingLLM หรือ Open WebUI
+- IF ต้องการคำตอบจากเอกสารของตัวเอง THEN ต้องใช้ RAG + vector database
+  + embedding
+- IF ต้องการ semantic search THEN ต้อง chunk และ embed เอกสารก่อน
+- IF ต้องการ coding assistant ที่ไม่พึ่ง cloud THEN ใช้ coding agent ที่ต่อ
+  local endpoint ได้
+- IF ต้องการให้ AI ทำงานตอนผู้ใช้ไม่อยู่ THEN ต้องใช้ automation เช่น n8n
+- IF ต้องการให้ AI ทำ action จริง THEN ต้องให้ agent มี tool
+- IF ข้อมูลเป็น email หรือข้อมูลส่วนตัว THEN local endpoint ลดความเสี่ยง
+  ด้าน privacy
+- IF ใช้งานแบบจริงจังระยะยาว THEN ต้องมีเครื่อง dedicated, BIOS auto power on,
+  container manager และ remote access
+- IF router ของ llama server ยังไม่เสถียร THEN ใช้ router/service ตัวอื่นแทน
+- IF เครื่องมือรองรับ OpenAI API format THEN สามารถเชื่อม local model ได้โดย
+  เปลี่ยน base URL
+- IF ระบบมีหลาย container THEN ควรใช้ Portainer/Arcane เพื่อจัดการง่าย
+- IF ต้องการเข้าถึงจากข้างนอกบ้าน THEN ใช้ Tailscale แทนการเปิด service
+  สาธารณะ
+
+============================================================
+CONSTRAINTS / RULES
+============================================================
+
+- ห้ามถือว่า local AI = แค่รันโมเดลในเครื่อง
+- ต้องแยก engine, endpoint, UI, RAG, agent, automation และ tool layer ให้ชัด
+- ต้องคำนึงถึง privacy เพราะข้อมูลส่วนตัว เช่น email ไม่ควรส่งไป cloud AI
+  โดยไม่จำเป็น
+- ต้องมี source verification เมื่อใช้ RAG
+- ต้องมี validation/report หลังใช้ coding agent แก้ project
+- ต้องตรวจความเข้ากันได้ของเครื่องมือกับ OpenAI-compatible endpoint
+- ต้องระวัง router ที่ยัง experimental
+- ต้องเลือกโมเดลให้เหมาะกับ hardware และ context window
+- ต้องใช้เครื่อง dedicated ถ้าจะทำ automation ต่อเนื่อง
+- ต้องตั้งระบบให้ recovery หลังไฟดับได้
+- ต้องมี container management สำหรับระบบที่มีหลาย service
+- ต้องมี remote access ที่ปลอดภัย เช่น private network
+- ไม่ควรเปิด port สาธารณะโดยไม่จำเป็น
+- ไม่ควรทำ production automation โดยไม่มี log/report/checkpoint
+
+============================================================
+OUTPUT / STORAGE DECISION
+============================================================
+
+เอกสารนี้ควรถูกเก็บเป็น Local Resource / Local Project ในกลุ่ม Local AI /
+AI House เพราะมีผลต่อการออกแบบระบบของผู้ใช้โดยตรง
+
+Suggested Tags:
+#LocalAIStack
+#PrivateAI
+#llamaCPP
+#OpenAICompatibleEndpoint
+#AnythingLLM
+#OpenWebUI
+#RAG
+#VectorDatabase
+#CodingAgent
+#n8n
+#Automation
+#Docker
+#Tailscale
+#AIHouse
+#BOBOman
+#BlackyMan
+
+Memory ที่ควรเก็บแบบ compact:
+- Local AI Stack ไม่ใช่แค่โมเดล แต่ต้องมี engine, endpoint, UI, RAG, agent,
+  automation, tool layer และ remote management
+- OpenAI-compatible endpoint เป็นแกนกลางที่ทำให้เครื่องมือ open-source เชื่อมกับ
+  local model ได้
+- RAG ต้องมี vector database + embedding + source verification
+- n8n ใช้เป็น automation layer โดยต่อ local LLM ผ่าน OpenAI-compatible credential
+- Production local AI ควรมีเครื่อง dedicated, BIOS auto power on, container manager
+  และ Tailscale
+
+============================================================
+SELF-CHECK / EXTRACTION REPORT
+============================================================
+
+Source Standard:
+- SkR00 / MEM00 Document Extraction Standard
+
+Source Document:
+- Build Your Own Fully Private, Local AI Stack
+
+Extraction Type:
+- Full structured extraction
+- Not short summary
+- Not report-only
+
+Coverage Check:
+- Header / Context: DONE
+- System Components: DONE
+- Parameters attached under related components: DONE
+- Relational Logic: DONE
+- Operations Workflow: DONE because source document contains real setup process
+- Constraints / Rules: DONE
+- Output / Storage Decision: DONE
+
+Important Detail Preservation:
+- Core local AI stack concept preserved
+- llama.cpp / server / endpoint preserved
+- AnythingLLM / Open WebUI preserved
+- RAG / Vector DB / Embedding preserved
+- Coding agent preserved
+- n8n automation preserved
+- Docker / container manager preserved
+- Tailscale / BIOS auto power-on / dedicated machine preserved
+
+Status:
+DONE

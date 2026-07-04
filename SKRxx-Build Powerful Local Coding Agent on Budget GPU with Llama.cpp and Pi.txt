@@ -1,0 +1,891 @@
+SkR00 DOCUMENT EXTRACTION DRAFT
+Document: Build Powerful Local Coding Agent on Budget GPU with Llama.cpp and Pi
+Source: YouTube Article
+Mode: Article only / no video download
+Standard: SkR00 / MEM00 Document Extraction Standard
+Purpose:
+สกัดข้อมูลจากบทความเรื่องการสร้าง Local Coding Agent บน GPU ราคาประหยัด
+โดยใช้ llama.cpp, Llama Server, MoE model, REAP model, Pi Coding Agent
+และ Tailscale ให้กลายเป็นข้อมูล structured, reusable, และใช้ต่อกับระบบ
+BOBOman / BlackyMan / AI House ได้
+
+
+============================================================
+1. HEADER / CONTEXT
+============================================================
+
+เอกสารนี้อธิบายวิธีสร้าง Local Coding Agent ที่สามารถใช้งานจริงบน GPU
+ราคาประหยัด โดยไม่ต้องพึ่ง cloud coding agent และไม่ต้องใช้ API key
+แนวคิดหลักคือการใช้ hardware consumer-grade เช่น RTX 3060 12GB,
+ระบบ RAM/CPU ที่มีอยู่, โมเดล MoE ที่ถูกตัดแต่งด้วย REAP, การ quantize
+แบบ Q4, การ optimize llama.cpp, การใช้ Llama Server model presets,
+การเชื่อมต่อกับ Pi Coding Agent และการเข้าถึงจากภายนอกผ่าน Tailscale
+
+เป้าหมายไม่ใช่แค่ให้โมเดลตอบข้อความได้ แต่ต้องทำงานแบบ coding agent
+จริง ได้แก่:
+- อ่าน system prompt ขนาดใหญ่
+- อ่านไฟล์และเอกสาร
+- ใช้เครื่องมือ
+- วิเคราะห์ codebase
+- เขียน / แก้ไขไฟล์
+- สลับโมเดลตามงาน
+- ทำงานได้จากนอกบ้านเหมือน cloud agent
+
+จุดสำคัญของเอกสารคือ:
+- งาน coding agent ต้องการ prompt processing speed สูงมาก
+- token generation speed สำคัญ แต่ไม่ใช่ตัวเดียวที่สำคัญ
+- agent workload หนักที่ prefill / prompt processing มากกว่า chat ปกติ
+- MoE + offload + Q4 + REAP + llama.cpp tuning ทำให้ GPU ราคาประหยัด
+  ใช้งาน agent ระดับกลางได้จริง
+- การใช้ Llama Server model presets ช่วยให้เปลี่ยนโมเดลโดยไม่ต้องปิด server
+- Tailscale ทำให้ local agent ใช้งานได้จากทุกที่
+
+
+============================================================
+2. SYSTEM COMPONENTS
+============================================================
+
+
+------------------------------------------------------------
+2.1 Local Coding Agent System
+------------------------------------------------------------
+
+Local Coding Agent System คือระบบ agent สำหรับงานเขียนโค้ดที่รันบนเครื่อง
+ของผู้ใช้เอง โดยใช้ local LLM แทน cloud LLM
+
+องค์ประกอบหลัก:
+- Budget GPU
+- System RAM
+- CPU
+- MoE model
+- REAP / pruned model
+- Quantization Q4
+- llama.cpp
+- Llama Server
+- Llama bench
+- Prompt cache reuse
+- Thread tuning
+- U-batch tuning
+- KV compression / Turbo Quant K
+- Pi Coding Agent
+- pi-llama-cpp extension
+- model presets / models.ini
+- Tailscale remote access
+
+Relational Logic:
+- IF ต้องการ coding agent local ที่ใช้งานจริง THEN ต้อง optimize ทั้ง
+  model, engine, prompt processing, cache, hardware split และ agent connection
+- IF ใช้แค่โมเดล local แบบ chat ทั่วไป THEN ยังไม่พอสำหรับ agent workload
+- IF agent ต้องอ่านไฟล์ / system prompt / tool schema / เอกสารจำนวนมาก
+  THEN prompt processing speed สำคัญมาก
+
+
+------------------------------------------------------------
+2.2 Budget GPU
+------------------------------------------------------------
+
+Budget GPU คือ GPU ราคาประหยัดที่มี VRAM พอสำหรับ local LLM ระดับกลาง
+
+ตัวอย่างในเอกสาร:
+- RTX 3060 12GB
+
+เหตุผลที่เลือก:
+- VRAM ต่อราคาดี
+- หาซื้อมือสองได้
+- ไม่ต้องใช้งบสูงมาก
+- เพียงพอสำหรับรัน MoE + offload + Q4
+- ใช้เทคนิค optimize เพื่อดึง performance เพิ่มได้
+
+Relational Logic:
+- IF GPU มี VRAM จำกัด THEN ต้องใช้ MoE, quantization, offload และ tuning
+- IF โมเดลโหลดเต็ม VRAM ได้ THEN เร็วกว่า offload เสมอ
+- IF ต้องการรันโมเดลใหญ่บน budget GPU THEN ต้องยอม offload ไป CPU/RAM
+- IF มี GPU VRAM น้อยกว่า RTX 3060 12GB THEN เทคนิคยังใช้ได้ แต่อาจต้องลด
+  model size / quant / context / layer placement
+
+
+------------------------------------------------------------
+2.3 System RAM
+------------------------------------------------------------
+
+System RAM ใช้รองรับส่วนของโมเดลที่ offload ออกจาก GPU โดยเฉพาะ expert
+layers ของ MoE model
+
+Parameters / Notes:
+- เอกสารกล่าวถึง DDR4 เป็นตัวอย่าง
+- DDR4 อาจมี bottleneck ประมาณ 54GB/s
+- ถ้าโมเดลดึง expert จาก RAM 1GB ต่อ token จะได้เพดานประมาณ 50 token/s
+- RAM bandwidth มีผลโดยตรงต่อ token generation เมื่อใช้ offload
+
+Relational Logic:
+- IF offload ไป system RAM มาก THEN RAM bandwidth กลายเป็น bottleneck
+- IF ลดภาระ RAM ได้ THEN CPU work ลดลงและ token generation เร็วขึ้น
+- IF MoE expert ถูกเก็บใน RAM THEN speed ถูกจำกัดโดย RAM bandwidth
+- IF RAM ช้าหรือ bandwidth ต่ำ THEN generation speed จะตัน แม้ GPU ยังมีแรง
+
+
+------------------------------------------------------------
+2.4 CPU
+------------------------------------------------------------
+
+CPU ใช้ประมวลผลส่วนที่ถูก offload โดยเฉพาะ expert layer ของ MoE
+
+Parameters / Notes:
+- ตัวอย่างในเอกสารใช้ CPU เก่า 4 core
+- จำนวน core มีผลต่อ parallel processing ต่อ layer
+- ไม่ควรใช้ทุก core จนหมด ควรเหลือ core สำหรับ scheduling และ GPU management
+
+Relational Logic:
+- IF ใช้ CPU ทุก thread เต็มเกินไป THEN decode performance อาจตก
+- IF เหลือ CPU core ให้ scheduling/GPU management THEN ระบบเสถียรและเร็วกว่า
+- IF CPU มี core น้อย THEN ต้อง benchmark หา thread count ที่เหมาะสม
+- IF thread count เพิ่มเกิน sweet spot THEN token generation อาจ collapse
+
+
+------------------------------------------------------------
+2.5 Hardware Priority
+------------------------------------------------------------
+
+ลำดับความสำคัญของ hardware สำหรับ setup นี้:
+
+1. VRAM
+2. RAM speed หรือ PCI speed ตามชนิด bottleneck
+3. CPU core count
+
+แต่ในบริบท llama.cpp + MoE offload:
+- VRAM สำคัญมากสำหรับ layer ที่อยู่ GPU
+- RAM bandwidth สำคัญมากสำหรับ expert ที่อยู่ RAM
+- CPU core count สำคัญ แต่ต้องไม่ใช้จนหมด
+- PCI มีผลตามรูปแบบ offload และ engine
+
+Relational Logic:
+- IF ใช้ offload จำนวนมาก THEN bottleneck จะย้ายจาก GPU ไป RAM/CPU/PCI
+- IF ต้องการ token generation สูง THEN ต้องลดข้อมูลที่ต้องดึงจาก RAM ต่อ token
+- IF ต้องการ agent response ดี THEN ต้อง optimize prompt processing ด้วย
+
+
+------------------------------------------------------------
+2.6 MoE Model
+------------------------------------------------------------
+
+MoE หรือ Mixture of Experts คือโมเดลที่มี parameter รวมสูง แต่ไม่ได้ activate
+ทั้งหมดในทุก token
+
+แนวคิดจากเอกสาร:
+- MoE มีประสิทธิภาพมากเมื่อเทียบกับขนาดรวม
+- MoE 30B อาจทำงานด้วย speed ใกล้โมเดล 3B เพราะ activate เฉพาะบาง expert
+- MoE เลือกใช้เฉพาะ knowledge ที่จำเป็นต่อ token ถัดไป
+- ประสิทธิภาพอาจต่ำกว่า dense บางกรณี เพราะ router อาจเลือก expert ไม่ถูกเสมอ
+- Frontier labs ใช้ MoE เพราะไม่มี hardware พอรัน dense trillion-parameter เต็ม ๆ
+
+Relational Logic:
+- IF ต้องการโมเดลใหญ่บน budget GPU THEN MoE เหมาะกว่า dense
+- IF MoE router เลือก expert ไม่ดี THEN คุณภาพอาจต่ำกว่า dense
+- IF active expert ต่ำ THEN speed ดีมากเมื่อเทียบกับ total parameter
+- IF ใช้ MoE ร่วมกับ REAP THEN ลด expert ที่ไม่ค่อยมีประโยชน์และลด memory load ได้
+
+
+------------------------------------------------------------
+2.7 REAP / Pruned MoE Model
+------------------------------------------------------------
+
+REAP คือเทคนิคการตัดแต่ง / ดึง / ลดขนาด MoE โดยเอาส่วน expert ที่มีประโยชน์ต่ำ
+ออก เพื่อลดน้ำหนักโมเดลและเพิ่มประสิทธิภาพ
+
+ข้อมูลจากเอกสาร:
+- Router ใน MoE อาจไม่ได้ calibrate ดีเสมอ
+- expert บางตัวมีความรู้สูงและมีประโยชน์
+- expert บางตัวใช้ RAM แต่แทบไม่ช่วยโมเดล
+- REAP ลดน้ำหนักส่วนที่ไม่ได้ใช้งานลงประมาณ 20%
+- ทำให้โมเดลเหลือประมาณ 80% ของขนาดเดิม
+- ในบาง benchmark โมเดลที่ถูก prune อาจดีกว่าโมเดลเต็ม
+
+ตัวอย่าง benchmark ที่กล่าวถึง:
+- HumanEval: pruned 23B = 95.1
+- base unpruned = 94.5
+
+Relational Logic:
+- IF expert บางส่วนแทบไม่ถูกใช้งาน THEN prune ออกได้เพื่อลด memory
+- IF model เล็กลง 20% THEN โหลด layer ไป GPU ได้มากขึ้น
+- IF offload ไป RAM ลดลง THEN prompt/generation performance ดีขึ้น
+- IF pruned model ยังรักษาคุณภาพได้ THEN เหมาะมากกับ budget GPU
+
+
+------------------------------------------------------------
+2.8 Models Used
+------------------------------------------------------------
+
+โมเดลที่เอกสารเลือกใช้:
+
+1. Qwen 3.6 MoE REAP จาก Unsloth
+   - เหมาะกับ coding
+   - เป็น MoE
+   - ใช้ REAP/pruned version
+   - ใช้ Q4 / Q4_K_M / Unsloth dynamic Q4
+
+2. GLM 4.7 Flash REAP 23B
+   - เป็น general model
+   - เร็วกว่าในบางกรณี
+   - coding อาจไม่ดีเท่า Qwen
+   - มี REAP ratio 20%
+   - ขนาดลดเหลือประมาณ 80%
+
+Relational Logic:
+- IF งานเป็น coding THEN Qwen REAP เหมาะกว่า
+- IF งานเป็น general / ต้องการ speed THEN GLM Flash REAP อาจเหมาะกว่า
+- IF มีหลายงาน THEN ใช้หลายโมเดลและสลับผ่าน model presets
+- IF ต้องการ agent ระดับกลาง THEN โมเดลช่วง 20B-40B เหมาะกว่าโมเดลต่ำกว่า 10B
+
+
+------------------------------------------------------------
+2.9 Quantization Q4
+------------------------------------------------------------
+
+เอกสารย้ำว่าไม่ได้ใช้ 1-bit, 2-bit หรือ 3-bit เพื่อให้ได้ผล แต่ใช้ Q4 เป็นหลัก
+
+Parameters / Notes:
+- ใช้ Q4 เป็น default
+- Q4_K_M เป็นตัวเลือกที่ดี
+- Unsloth dynamic Q4 เป็นตัวเลือกที่ดี
+- ต่ำกว่า Q4 เริ่มเสียหาย
+- หลายอย่างอาจหยุดทำงานถ้า quant ต่ำเกินไป
+- Q4 ทำให้โมเดลเล็กกว่าต้นฉบับประมาณ 4 เท่า
+- คุณภาพและ performance แทบไม่เสียมากเมื่อเทียบกับต้นฉบับ
+
+Relational Logic:
+- IF ต้องการคุณภาพที่ยังไว้ใจได้ THEN ใช้ Q4
+- IF ต่ำกว่า Q4 THEN quality/reasoning/tool use อาจเสีย
+- IF ใช้ coding agent THEN ไม่ควรลด quant ต่ำเกินไป เพราะ agent ต้อง reasoning
+- IF ใช้ Q4 + REAP + MoE THEN ได้ balance ที่ดีบน budget GPU
+
+
+------------------------------------------------------------
+2.10 llama.cpp
+------------------------------------------------------------
+
+llama.cpp คือ engine หลักที่ใช้ดึงประสิทธิภาพจาก hardware
+
+บทบาท:
+- รันโมเดล local
+- รองรับ offload CPU/GPU
+- มี prompt cache
+- รองรับ Llama Server
+- รองรับ benchmark ผ่าน llama-bench
+- รองรับ model presets
+- เชื่อมกับ Pi ได้โดยตรงผ่าน extension
+
+Relational Logic:
+- IF ต้องการ optimize ลึกบน budget GPU THEN ใช้ llama.cpp
+- IF ต้องการลด middleware THEN ให้ Pi ต่อ Llama Server โดยตรง
+- IF ต้องการสลับโมเดลอัตโนมัติ THEN ใช้ Llama Server model presets
+- IF ต้องการหา setting ที่ดีที่สุด THEN ใช้ llama-bench
+
+
+------------------------------------------------------------
+2.11 Llama Server
+------------------------------------------------------------
+
+Llama Server คือ server ของ llama.cpp ที่เปิดโมเดลให้ agent หรือ client เรียกใช้
+
+บทบาท:
+- รัน local model
+- ให้ endpoint สำหรับ Pi Coding Agent
+- รองรับ model presets
+- list model ผ่าน endpoint
+- unload/load model อัตโนมัติเมื่อเปลี่ยนโมเดลจาก Pi
+- ช่วยให้ server เปิดตลอดเวลาโดยไม่ต้อง restart ทุกครั้งที่เปลี่ยน model
+
+ข้อจำกัดเดิม:
+- ถ้าไม่ใช้ model presets server จะรันโมเดลตาม config เดียว
+- เปลี่ยนโมเดลต้อง stop server, เปลี่ยน path, เปลี่ยน setting, start ใหม่
+
+Relational Logic:
+- IF ต้องการ hand-free local agent THEN Llama Server ต้องเปิดค้างได้
+- IF ต้องการสลับโมเดลจาก Pi THEN ใช้ model presets
+- IF โมเดลใหญ่ THEN unload/load อาจใช้เวลา แต่ยังดีกว่า manual restart
+- IF server อยู่เครื่อง AI rig THEN laptop/agent client สามารถใช้งานจากที่อื่นได้
+
+
+------------------------------------------------------------
+2.12 Prompt Processing / Prefill Speed
+------------------------------------------------------------
+
+Prompt processing หรือ prefill speed คือความเร็วในการประมวลผล input prompt
+ก่อนเริ่ม generate token
+
+เอกสารย้ำว่า:
+- Chat ปกติอาจไม่เห็นผล prompt processing มาก
+- Coding agent เห็นผลมาก เพราะ system prompt ใหญ่
+- Agent ต้องประมวลผล:
+  - system instructions
+  - MCP content
+  - tool definitions
+  - usage details
+  - documents
+  - code files
+- ถ้า prompt processing ช้า agent จะรู้สึกช้ามาก
+- prompt processing สำคัญกว่า token generation speed ใน agent workload หลายกรณี
+
+ตัวเลขจากเอกสาร:
+- prompt processing สูงสุดที่กล่าวถึง: 1,142 tokens/s
+- decoding ประมาณ 40 tokens/s
+- Qwen U-batch 256 ได้ประมาณ 300 prompt tokens/s
+- Qwen U-batch 2048 ได้ประมาณ 1,142 prompt tokens/s
+- GLM prompt processing จาก 446 เพิ่มเป็น 863 tokens/s
+
+Relational Logic:
+- IF agent workload มี prompt ใหญ่ THEN prompt processing speed คือ bottleneck หลัก
+- IF prefill เร็ว THEN time-to-first-token ดีขึ้น
+- IF U-batch ใหญ่ขึ้นและ VRAM พอ THEN prompt processing เร็วขึ้น
+- IF สนใจแต่ token generation THEN อาจ optimize ผิดจุดสำหรับ coding agent
+
+
+------------------------------------------------------------
+2.13 Token Generation / Decoding Speed
+------------------------------------------------------------
+
+Token generation หรือ decoding speed คือความเร็วที่โมเดลสร้าง output token
+
+ตัวเลขจากเอกสาร:
+- decoding ประมาณ 40 tokens/s ใน setup ที่ optimize
+- GLM thread 3 ได้ 45.77
+- GLM thread 4 ตกเหลือ 27
+- Qwen thread 1 ได้ 28
+- Qwen thread 3 ได้ 39.5
+- Qwen thread 4 ตกเหลือ 22
+
+Relational Logic:
+- IF เพิ่ม thread จนเกิน sweet spot THEN decode speed จะตก
+- IF ใช้ CPU ทุก core จนหมด THEN scheduling/GPU management แย่ลง
+- IF generation speed สูงแต่ prompt processing ช้า THEN agent ยังรู้สึกช้า
+- IF coding agent ใช้งานจริง THEN ต้อง balance prefill + decoding
+
+
+------------------------------------------------------------
+2.14 Prompt Cache Reuse
+------------------------------------------------------------
+
+Prompt cache reuse คือการใช้ cache ของ prompt เดิมซ้ำใน turn ถัดไป
+เพื่อลดการประมวลผลซ้ำ
+
+พื้นฐาน:
+- ครั้งแรก agent ต้อง process prompt ทั้งหมด
+- llama.cpp cache context อัตโนมัติ
+- turn ถัดไปใช้ cache ได้
+- ถ้ามีบางส่วนของ context เปลี่ยน cache อาจ invalidated
+
+ปัญหา:
+- ถ้า tool เปลี่ยน
+- ถ้าการเรียก tool ถูกลบหรือเปลี่ยน
+- ถ้าส่วนหนึ่งของ context เปลี่ยน
+- cache ใหญ่บางส่วนอาจถูก invalidated แล้วต้อง process ใหม่ตั้งแต่ต้น
+
+วิธีแก้:
+- แบ่ง prompt cache เป็น chunk ย่อย เช่น 256 tokens
+- เมื่อส่วนหนึ่งเปลี่ยน process ใหม่เฉพาะส่วนนั้น
+- ลด TTFT
+- ลดเวลารอ prefill
+- agent เริ่มตอบเร็วขึ้น
+
+Relational Logic:
+- IF context ไม่เปลี่ยนมาก THEN cache reuse ช่วย turn ถัดไปเร็วขึ้น
+- IF context เปลี่ยนบางส่วน THEN chunked cache reuse ลดการ process ใหม่ทั้งก้อน
+- IF cache invalidated ทั้งหมด THEN agent จะช้ามาก
+- IF ใช้ agent ต่อเนื่อง THEN cache reuse มีผลมาก
+
+
+------------------------------------------------------------
+2.15 Thread Tuning
+------------------------------------------------------------
+
+Thread tuning คือการกำหนดจำนวน thread ที่ใช้กับ LLM
+
+Parameters จากเอกสาร:
+- CPU ตัวอย่างมี 4 core / 4 thread
+- ทดลอง thread 1-4
+- Qwen:
+  - thread 1 = 28 decode
+  - thread 3 = 39.5 decode
+  - thread 4 = 22 decode
+- GLM:
+  - thread 3 = 45.77 decode
+  - thread 4 = 27 decode
+
+ข้อสรุป:
+- thread มากกว่าไม่ได้ดีกว่าเสมอ
+- thread 3 คือ sweet spot ในตัวอย่าง
+- ควรเหลือ 1 core ให้ scheduling และ GPU management
+
+Relational Logic:
+- IF CPU มี 4 core THEN อย่าใช้ครบ 4 เสมอ
+- IF thread count สูงเกินไป THEN decode collapse ได้
+- IF เหลือ CPU ให้ระบบจัดการ GPU THEN throughput ดีขึ้น
+- IF เครื่องต่างกัน THEN ต้อง benchmark เอง
+
+
+------------------------------------------------------------
+2.16 U-batch Tuning
+------------------------------------------------------------
+
+U-batch คือจำนวน token ที่ดึงจาก memory สำหรับ batch หนึ่งระหว่าง prefill
+
+Parameters จากเอกสาร:
+- เริ่มได้ตั้งแต่ 16 token
+- สูงได้ถึง 32,000 token ถ้า VRAM รองรับ
+- Qwen U-batch 256 = 300 prompt tokens/s
+- Qwen U-batch 2048 = 1,142 prompt tokens/s
+- GLM เพิ่มจาก 446 เป็น 863 prompt tokens/s
+- TG ค่อนข้างคงที่
+- U-batch มีผลหลักกับ prefill ไม่ใช่ decode
+- U-batch ใหญ่ใช้ VRAM มากขึ้น
+
+Relational Logic:
+- IF U-batch ใหญ่ขึ้น THEN prompt processing เร็วขึ้น
+- IF VRAM ไม่พอ THEN U-batch ใหญ่เกินไปใช้ไม่ได้
+- IF agent workload prompt ใหญ่ THEN U-batch tuning สำคัญมาก
+- IF TG คงที่แต่ PP เพิ่ม THEN U-batch มีผลเฉพาะ prefill
+
+
+------------------------------------------------------------
+2.17 llama-bench
+------------------------------------------------------------
+
+llama-bench คือเครื่องมือ benchmark สำหรับทดสอบ config หลายชุด
+
+บทบาท:
+- ใส่ค่า thread หลายค่า
+- ใส่ค่า U-batch หลายค่า
+- ทดสอบแต่ละ configuration
+- รายงาน PP และ TG
+  - PP = Prompt Processing
+  - TG = Token Generation
+
+Relational Logic:
+- IF ต้องการหา setting ที่ดีที่สุด THEN ใช้ llama-bench
+- IF ใช้ค่าจากคนอื่นโดยไม่ทดสอบเครื่องตัวเอง THEN อาจไม่ได้ performance ดีสุด
+- IF hardware ต่างกัน THEN sweet spot ต่างกัน
+- IF ต้องทำระบบจริง THEN benchmark ต้องเป็นขั้นตอนบังคับ
+
+
+------------------------------------------------------------
+2.18 KV Compression / Turbo Quant K
+------------------------------------------------------------
+
+KV compression หรือ Turbo Quant K คือการบีบอัด KV cache
+เพื่อประหยัด VRAM และเพิ่มพื้นที่ให้ offload layer กลับเข้า GPU ได้
+
+แนวคิด:
+- Key ควรมี precision สูงเท่าที่เป็นไปได้
+- Turbo 4 ให้คุณภาพแทบไม่เสีย
+- Value ต้องรักษารูปทรงของ vector ไม่จำเป็นต้องแม่นเป๊ะ
+- Value ใช้ Turbo 2 ขึ้นไปได้
+
+ผลจากเอกสาร:
+- GLM:
+  - Turbo KV เพิ่ม decode 12%
+  - แต่เสีย prefill 25%
+  - เป็น trade-off
+- Qwen:
+  - prefill +4%
+  - decode +5%
+  - ถือว่าชนะชัดเจน
+
+Relational Logic:
+- IF VRAM จำกัด THEN KV compression ช่วยคืนพื้นที่ VRAM
+- IF VRAM ว่างขึ้น THEN ดึง expert layers กลับเข้า GPU ได้มากขึ้น
+- IF model ใหญ่เมื่อเทียบกับ VRAM THEN KV compression มีผลดีขึ้น
+- IF model/engine ต่างกัน THEN KV compression อาจมี trade-off ต่างกัน
+- IF ใช้ GLM THEN ต้องระวัง prefill drop
+- IF ใช้ Qwen THEN Turbo KV อาจให้ผลบวกทั้ง prefill และ decode
+
+
+------------------------------------------------------------
+2.19 Pi Coding Agent
+------------------------------------------------------------
+
+Pi Coding Agent คือ coding agent น้ำหนักเบา ปรับแต่งง่าย
+และเชื่อมกับ llama.cpp ได้โดยตรง
+
+บทบาท:
+- ทำงานเป็น local coding agent
+- อ่านไฟล์
+- เขียนไฟล์
+- แก้ไขไฟล์
+- เรียกใช้เครื่องมือ
+- แสดง reasoning panel
+- เชื่อม Llama Server โดยตรงผ่าน extension
+- ไม่ต้องใช้ middleware/proxy บุคคลที่สาม
+
+เหตุผลที่เลือก:
+- เบา
+- ปรับแต่งง่าย
+- concept คล้าย llama.cpp
+- รองรับ Llama.cpp โดยตรง
+
+Relational Logic:
+- IF ต้องการ local coding agent ที่เบา THEN ใช้ Pi
+- IF ต้องการลด layer ซับซ้อน THEN ต่อ Llama Server โดยตรง
+- IF agent ต้องใช้ model หลายตัว THEN Pi อ่าน model list จาก Llama Server ได้
+- IF ต้องการดูว่า agent คิดอะไร THEN reasoning panel ช่วยลด black box
+
+
+------------------------------------------------------------
+2.20 pi-llama-cpp Extension
+------------------------------------------------------------
+
+pi-llama-cpp extension คือ package สำหรับให้ Pi เชื่อมกับ Llama Server
+
+คำสั่งจากเอกสาร:
+- `Pi install npm:pi-llama-cpp`
+
+การตั้งค่า:
+- update `settings.json`
+- เพิ่ม URL ของ Llama Server
+- extension ค้นหา model ที่มีอยู่ใน Llama Server อัตโนมัติ
+- รองรับ presets / modes / model list
+
+Relational Logic:
+- IF ติดตั้ง pi-llama-cpp THEN Pi ใช้ Llama Server ได้โดยตรง
+- IF Llama Server มี model presets THEN Pi แสดงรายการโมเดลให้เลือกได้
+- IF URL ชี้ไป Llama Server ถูกต้อง THEN agent ใช้ local model ได้
+
+
+------------------------------------------------------------
+2.21 Model Presets / models.ini
+------------------------------------------------------------
+
+Model presets คือระบบกำหนด config หลายโมเดลในไฟล์ INI
+เพื่อให้ Llama Server โหลด/สลับโมเดลได้โดยไม่ต้อง restart แบบ manual
+
+โครงทำงาน:
+- สร้างไฟล์ INI เช่น `models.ini`
+- กำหนดค่า model path และ setting ของแต่ละโมเดล
+- start Llama Server โดยเรียก preset file
+- Llama Server expose model list
+- Pi ใช้ `/models` เพื่อดูโมเดล
+- เมื่อเลือกโมเดลใหม่ Llama Server unload โมเดลเดิมและ load โมเดลใหม่
+
+Relational Logic:
+- IF ใช้ model presets THEN ไม่ต้อง stop/start server เพื่อเปลี่ยน model
+- IF แต่ละโมเดลต้องใช้ setting ต่างกัน THEN ใส่ config แยกใน INI
+- IF agent ต้องสลับ coding/general model THEN presets สำคัญมาก
+- IF โมเดลใหญ่ THEN load/unload ใช้เวลา แต่ workflow ยังดีกว่า manual
+
+
+------------------------------------------------------------
+2.22 Tailscale Remote Access
+------------------------------------------------------------
+
+Tailscale ใช้ให้ laptop หรือ client ต่อเข้า AI rig จากภายนอกบ้านได้
+แบบ private network
+
+บทบาท:
+- ติดตั้งบน AI rig
+- ติดตั้งบน laptop
+- ใช้ Tailscale IP เป็น Llama Server URL
+- ใช้ coding agent จากร้านกาแฟหรือที่อื่นได้
+- ให้ประสบการณ์คล้าย cloud coding agent แต่รันบนเครื่องตัวเอง
+
+Relational Logic:
+- IF ต้องการใช้ local coding agent จากนอกบ้าน THEN ใช้ Tailscale
+- IF ไม่ต้องการเปิด public port THEN ใช้ private network
+- IF AI rig เปิดอยู่ที่บ้าน THEN laptop ใช้ Pi ต่อ Llama Server ผ่าน Tailscale ได้
+- IF ต้องการ cloud-like experience โดยไม่มี subscription THEN Tailscale + local server ตอบโจทย์
+
+
+============================================================
+3. OPERATIONS WORKFLOW
+============================================================
+
+
+------------------------------------------------------------
+3.1 Workflow: สร้าง Local Coding Agent บน Budget GPU
+------------------------------------------------------------
+
+1. เตรียมเครื่อง AI rig
+   - GPU ราคาประหยัด เช่น RTX 3060 12GB
+   - RAM ระบบเพียงพอ
+   - CPU ที่ใช้งานได้ แม้เป็นรุ่นเก่าก็เริ่มได้
+
+2. เลือกโมเดล MoE
+   - เลือกโมเดลช่วง 20B-40B
+   - เลือก REAP/pruned model ถ้ามี
+   - ใช้ Q4 / Q4_K_M / Unsloth Dynamic Q4
+
+3. ติดตั้งและตั้งค่า llama.cpp
+   - ใช้ Llama Server
+   - ตั้งค่า offload
+   - เตรียม model path
+   - เปิด endpoint สำหรับ agent
+
+4. Benchmark ด้วย llama-bench
+   - ทดลอง thread count
+   - ทดลอง U-batch
+   - ดู PP และ TG
+   - หา sweet spot ของเครื่องตัวเอง
+
+5. ปรับ prompt processing
+   - ใช้ U-batch ใหญ่เท่าที่ VRAM รองรับ
+   - เปิด prompt cache reuse
+   - ลด cache invalidation เท่าที่ทำได้
+
+6. ปรับ decoding
+   - เลือก thread count ที่ไม่กิน CPU หมด
+   - เหลือ core ให้ scheduling/GPU management
+
+7. ปรับ KV compression
+   - ทดสอบ Turbo KV
+   - ตรวจผลต่อ prefill และ decode
+   - เลือก config ที่ชนะกับ model นั้นจริง
+
+8. ติดตั้ง Pi Coding Agent
+   - ติดตั้ง pi-llama-cpp
+   - แก้ `settings.json`
+   - เพิ่ม Llama Server URL
+
+9. ตั้ง model presets
+   - สร้าง `models.ini`
+   - กำหนด config แยกสำหรับ Qwen / GLM / โมเดลอื่น
+   - start Llama Server ด้วย preset file
+
+10. ทดสอบ agent
+   - ใช้ `/models`
+   - เลือกโมเดล
+   - ให้ agent อ่าน/เขียน/แก้ไฟล์
+   - ตรวจ speed และ behavior
+
+11. ตั้ง remote access
+   - ติดตั้ง Tailscale บน AI rig
+   - ติดตั้ง Tailscale บน laptop
+   - ใช้ Tailscale IP เป็น server URL
+
+Success Criteria:
+- Agent อ่าน/เขียน/แก้ไฟล์ได้
+- Prompt processing เร็วพอ
+- Decode speed ใช้งานได้
+- เปลี่ยนโมเดลจาก Pi ได้
+- ใช้งานจากนอกบ้านผ่าน Tailscale ได้
+- ไม่ต้องใช้ API key / subscription / cloud model
+
+
+------------------------------------------------------------
+3.2 Workflow: Benchmark หา Config ที่เหมาะกับเครื่อง
+------------------------------------------------------------
+
+1. เปิด llama-bench
+2. ทดสอบ thread count หลายค่า
+3. บันทึก PP และ TG
+4. เลือก thread ที่ TG สูงสุดโดยไม่ทำให้ระบบตัน
+5. ทดสอบ U-batch หลายค่า
+6. เพิ่ม U-batch จนกว่า VRAM จะเริ่มไม่พอ
+7. บันทึก prefill speed
+8. ทดสอบ KV compression
+9. เปรียบเทียบ prefill / decode / VRAM free
+10. เลือก config ที่ balance ดีสุดสำหรับ agent workload
+
+Success Criteria:
+- ได้ thread sweet spot
+- ได้ U-batch sweet spot
+- ได้ KV compression setting ที่เหมาะกับ model
+- มีตัวเลข PP/TG ยืนยัน ไม่ใช้การเดา
+
+
+------------------------------------------------------------
+3.3 Workflow: ใช้ Model Presets เพื่อสลับโมเดล
+------------------------------------------------------------
+
+1. สร้างไฟล์ `models.ini`
+2. ใส่ config ของแต่ละ model
+   - model path
+   - quant
+   - offload setting
+   - thread
+   - U-batch
+   - KV setting
+3. start Llama Server ด้วย preset file
+4. เปิด Pi Coding Agent
+5. ใช้คำสั่ง `/models`
+6. เลือกโมเดลที่ต้องการ
+7. ให้ Llama Server unload/load อัตโนมัติ
+8. ทดสอบงาน coding/general แยกตามโมเดล
+
+Success Criteria:
+- ไม่ต้อง restart server เองทุกครั้ง
+- Pi เห็น model list
+- สลับโมเดลได้จาก agent
+- แต่ละโมเดลใช้ config ของตัวเองได้
+
+
+------------------------------------------------------------
+3.4 Workflow: Remote Local Coding Agent
+------------------------------------------------------------
+
+1. ติดตั้ง Tailscale บน AI rig
+2. ติดตั้ง Tailscale บน laptop/client
+3. ตรวจว่าเครื่องเห็นกันผ่าน Tailscale network
+4. ใช้ Tailscale IP ของ AI rig เป็น Llama Server URL
+5. ตั้ง Pi บน laptop ให้ชี้ไป URL นี้
+6. ทดสอบ `/models`
+7. ทดสอบ coding agent จากนอกบ้าน
+
+Success Criteria:
+- ใช้ local model จาก laptop ได้
+- ไม่ต้องเปิด public port
+- ประสบการณ์คล้าย cloud coding agent
+- ข้อมูลยังอยู่บนเครื่องของผู้ใช้
+
+
+============================================================
+4. RELATIONAL LOGIC
+============================================================
+
+- IF ต้องการ coding agent local ที่ใช้งานจริง THEN prompt processing speed
+  สำคัญมากกว่า chat ทั่วไป
+
+- IF agent ต้องอ่าน system prompt, tools, MCP, docs, code files THEN prefill
+  จะเป็น bottleneck หลัก
+
+- IF โมเดลโหลดเต็ม VRAM ได้ THEN เร็วกว่า offload เสมอ
+
+- IF ต้องการโมเดลใหญ่บน budget GPU THEN ต้องใช้ offload ไป CPU/RAM
+
+- IF offload มาก THEN speed จำกัดด้วย RAM bandwidth, PCI bandwidth และ CPU core
+
+- IF DDR4 bandwidth ประมาณ 54GB/s THEN การดึง expert จาก RAM จะมีเพดาน
+  speed ตามข้อมูลที่ต้องอ่านต่อ token
+
+- IF ลด RAM load ได้ THEN CPU work ลดและ token generation เพิ่ม
+
+- IF ใช้ MoE THEN total parameter ไม่ใช่ภาระทั้งหมดต่อ token
+
+- IF MoE router เลือก expert ไม่ดี THEN expert บางตัวกิน memory แต่ไม่ช่วยคุณภาพ
+
+- IF ใช้ REAP THEN ลด expert ที่ไม่คุ้มและลด model size ได้ประมาณ 20%
+
+- IF model size ลดลง THEN โหลด layer เข้า GPU ได้มากขึ้น
+
+- IF ใช้ Q4 THEN ได้ขนาดเล็กลงมากโดยคุณภาพยังดี
+
+- IF ต่ำกว่า Q4 THEN agent / coding / reasoning อาจเสีย
+
+- IF โมเดลต่ำกว่า 10B หรือ 20B THEN อาจไม่เหมาะกับงาน coding สำคัญ
+
+- IF ใช้ Qwen REAP THEN เหมาะกับ coding มากกว่า
+
+- IF ใช้ GLM Flash REAP THEN general task เร็ว แต่อาจ coding ด้อยกว่า Qwen
+
+- IF ใช้ llama.cpp THEN สามารถ tune prompt cache, thread, U-batch, KV ได้
+
+- IF cache invalidated ทั้งหมด THEN agent จะ process ใหม่ตั้งแต่ต้นและช้ามาก
+
+- IF prompt cache แบ่งเป็น chunk 256 token THEN เปลี่ยนบางส่วนแล้ว process ใหม่
+  เฉพาะ chunk นั้นได้
+
+- IF U-batch ใหญ่ขึ้น THEN prompt processing เร็วขึ้น แต่กิน VRAM มากขึ้น
+
+- IF thread มากเกิน sweet spot THEN decode speed collapse
+
+- IF เหลือ CPU core สำหรับ scheduling/GPU management THEN performance ดีขึ้น
+
+- IF ใช้ llama-bench THEN รู้ค่า PP/TG จริงของเครื่อง
+
+- IF ไม่ benchmark เอง THEN setting จากคนอื่นอาจไม่เหมาะกับเครื่องของผู้ใช้
+
+- IF ใช้ KV compression THEN อาจเพิ่ม decode หรือคืน VRAM ได้ แต่ต้องดู trade-off
+
+- IF VRAM ที่ว่างเพิ่มขึ้น THEN ดึง expert layer กลับเข้า GPU ได้มากขึ้น
+
+- IF Pi ต่อ Llama Server โดยตรง THEN ไม่ต้องใช้ middleware/proxy
+
+- IF ใช้ model presets THEN เปลี่ยนโมเดลได้โดยไม่ต้อง restart manual
+
+- IF ใช้ Tailscale THEN local coding agent ใช้งานได้จากนอกบ้านแบบ private
+
+- IF ไม่ใช้ cloud API THEN ไม่มี subscription, API key, rate limit แต่ต้องจ่ายค่าไฟเอง
+
+
+============================================================
+5. CONSTRAINTS / RULES
+============================================================
+
+- ห้ามสนใจเฉพาะ token generation speed สำหรับ coding agent
+- ต้องวัด prompt processing speed ด้วยเสมอ
+- ต้อง benchmark บนเครื่องจริงด้วย llama-bench
+- ห้ามใช้ค่า thread สูงสุดโดยอัตโนมัติ
+- ต้องเหลือ CPU core ให้ระบบจัดการ scheduling/GPU
+- ห้ามลด quant ต่ำกว่า Q4 ถ้าต้องการ reasoning/tool use ที่ไว้ใจได้
+- ห้ามใช้โมเดลเล็กเกินไปกับงาน coding สำคัญ
+- ห้ามคิดว่า MoE ทุกตัวดี ต้องดู router, active experts และ REAP/pruning
+- ห้ามยึด total parameter อย่างเดียว ต้องดู active workload
+- ห้ามเปลี่ยนโมเดลด้วย manual restart ถ้าต้องใช้งาน agent จริง
+- ต้องใช้ model presets หากต้องการ multi-model workflow
+- ห้ามเปิด public port โดยไม่จำเป็น
+- ใช้ Tailscale หรือ private network สำหรับ remote access
+- ต้องตรวจ PP/TG หลังปรับทุกค่า
+- ต้องยอมรับว่า full VRAM model เร็วกว่า offload เสมอ
+- แต่ถ้าอยากรันโมเดลใหญ่บน budget GPU ต้องใช้ offload อย่างหลีกเลี่ยงไม่ได้
+
+
+============================================================
+6. OUTPUT / STORAGE DECISION
+============================================================
+
+เอกสารนี้ควรเก็บเป็น Local AI Resource / Coding Agent Resource
+ภายใน AI House เพราะเกี่ยวข้องโดยตรงกับการสร้าง Local Coding Agent
+บน BOBOman หรือ BlackyMan
+
+Suggested Storage:
+- AI House / LocalAI / Resource
+- BOBOman_LocalAI / Resource
+- PROJ_LocalCodingAgent / Reference
+- MEM หรือ Resource สำหรับ Local AI Agent Performance Standard
+
+Suggested Tags:
+#SkR00
+#LocalAI
+#LocalCodingAgent
+#BudgetGPU
+#llamaCPP
+#LlamaServer
+#PiCodingAgent
+#MoE
+#REAP
+#Q4
+#Q4KM
+#PromptProcessing
+#Prefill
+#TokenGeneration
+#Ubatch
+#ThreadTuning
+#KVCompression
+#Tailscale
+#BOBOman
+#BlackyMan
+#AIHouse
+
+
+============================================================
+7. MEMORY-COMPACT VERSION
+============================================================
+
+ควรเก็บ memory แบบ compact เฉพาะแกน logic ดังนี้:
+
+Local Coding Agent บน budget GPU ต้อง optimize prompt processing
+ไม่ใช่ดู token generation อย่างเดียว เพราะ agent ต้องอ่าน system prompt,
+tools, MCP, docs และ code files จำนวนมาก
+
+แนวทางหลัก:
+- ใช้ MoE model ช่วง 20B-40B
+- ใช้ REAP/pruned model เพื่อลด expert ที่ไม่คุ้มประมาณ 20%
+- ใช้ Q4 / Q4_K_M / Unsloth dynamic Q4 เป็น default
+- หลีกเลี่ยง quant ต่ำกว่า Q4 สำหรับ coding agent
+- ใช้ llama.cpp / Llama Server เป็น engine หลัก
+- ใช้ llama-bench หา thread, U-batch, PP/TG ที่ดีที่สุดของเครื่องจริง
+- thread มากสุดไม่จำเป็นต้องดีที่สุด ต้องเหลือ CPU core ให้ scheduling/GPU
+- U-batch ใหญ่ช่วยเพิ่ม prompt processing แต่กิน VRAM
+- KV compression อาจคืน VRAM และเพิ่ม performance แต่ต้อง benchmark ต่อโมเดล
+- ใช้ Pi Coding Agent + pi-llama-cpp เพื่อต่อ Llama Server โดยตรง
+- ใช้ model presets / models.ini เพื่อสลับโมเดลโดยไม่ต้อง restart server
+- ใช้ Tailscale เพื่อใช้งาน agent จากนอกบ้านแบบ private network
+
+END OF SkR00 DRAFT
